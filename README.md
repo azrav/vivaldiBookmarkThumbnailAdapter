@@ -2,7 +2,7 @@
 *Edited title. Initially called "Bookmark Thumbnail Hijacking - Workaround"*
 
 A workaround mod aimed to adapt bookmark thumbnails according to their URLs.
-Here's hoping that this mod becomes obsolete. (When thumbnails gets better support)
+Here's hoping that this mod becomes obsolete *to me*. (When thumbnails gets better support)
 
 ![QueGER0KgW.gif](/assets/uploads/files/1596378734615-queger0kgw.gif) 
 
@@ -12,7 +12,8 @@ The Initial intention was to cater thumbnail displays for youtube.
 2. Refreshing bookmark thumbnails leaves you with a start-of-video black screen which can be undesirable.
 3. Manually setting custom thumbnails for bulks of youtube bookmark isn't scaleable (takes up space on computer, and your effort/time)
 
-After some thought, I realize I could extend this to cover more Platforms / APIs other than Youtube. I'm doing this for learning and hobby too.
+After some thought, I realize I could extend this to cover more Platforms / APIs other than Youtube.
+I'm doing this for learning and hobby too.
 
 ---
 
@@ -32,7 +33,7 @@ You can increase the rate of update by lowering the 1000 (milliseconds) in
 var bookmarkThumbnailAdapter = setInterval(adaptBookmarkThumbnails, 1000);
 ```
 
-Under the processDeviantArt function, you can reorder which image-type to you prefer.
+Under the processDeviantArt function, you can reorder the image-type you prefer.
 It'll attempt to grab the first available image-url it encounters.
 ```
 testImage(url, userUrl+'.gif', success, ()=> {
@@ -51,10 +52,11 @@ I've set `object-fit` to use `contain`, but you could change it `cover` or `fill
 - Youtube (videos only; channel and playlist thumbnails requires API Key)
 - Vimeo
 - Instagram (posts only)
+- GIPHY (gifs & profile)
 - deviantArt (profile page, with `oembed` fallbacks.)
 - Newgrounds (`portal/view` & `audio/listen` submissions only)
 
-Going to iron out the edge cases that over time *if I can*.
+Going to iron out the edge cases over time *if I can*.
 
 ---
 
