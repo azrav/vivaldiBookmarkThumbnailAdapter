@@ -4,7 +4,7 @@
 A workaround mod aimed to adapt bookmark thumbnails according to their URLs.
 Here's hoping that this mod becomes obsolete *to me*. (When thumbnails gets better support)
 
-![QueGER0KgW.gif](/assets/uploads/files/1596378734615-queger0kgw.gif) 
+![QueGER0KgW.gif](https://forum.vivaldi.net/assets/uploads/files/1596378734615-queger0kgw.gif) 
 
 #### Why?
 The Initial intention was to cater thumbnail displays for youtube.
