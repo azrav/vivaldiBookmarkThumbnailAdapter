@@ -96,7 +96,7 @@ function processYoutubeVimeo(img, url)
         if (matches[3].indexOf('youtu') > -1)
         {
             //Check if this is a playlist
-            matches = url.match(/^.*playlist?list=([A-Za-z0-9._%-]*)(\&\S+)?$/)
+            matches = url.match(/^.*playlist\?list=([A-Za-z0-9._%-]*)(\&\S+)?$/)
             if (matches) {
                 let playlistID = matches[1];
 
