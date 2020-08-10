@@ -2,26 +2,101 @@
 
 var thumbDB = {};           //Thumbnail database to store images
 var addrFields = {};        //Map of address field element(s) using their DOMPaths as key
-var cyclesTillRefresh = 10; //No. of cycles till Data update
-var cycles = 10;            //No. of cycles counting
 var uID = 0;                //Unique ID counter for tracking address field elements
+
+var cyclesTillRefresh = 10;     //No. of cycles till Data update
+var cycles = 10;                //No. of cycles counting
+var coverFitThreshold = 3.5;    //Aspect ratio more than or equal to this will use cover 
+var tickRate = 1000;            //Time interval between each update; Default 1000ms
 
 //API Keys
 //---
-//  Self-insert for your Youtube API_KEY for your own use.
-//  I'm still trying to figure the quota for this.
-var youtubeAPIKey = '{YOUTUBE_API_KEY}';
 var giphyPublicBetaKey = 'dc6zaTOxFJmzC';   //yay
 
-//Set image source, and cache it with trimmed bookmarkUrl
-function setImgSrc(img, srcUrl, bookmarkUrl) {
-    img.src = srcUrl;
-    thumbDB[bookmarkUrl] = srcUrl;
-    console.log('cached ',bookmarkUrl,'->',srcUrl)
+// --- Image Section ---
+
+function setImgSrc_Only(img, srcUrl)
+{
+    if (img == null) {
+        console.log('setImgSrc_Only > WARNING: img is null');
+        return;
+    }
+
+    // Check if img is not an Image element (might be a SVG)
+    if (!(img instanceof HTMLImageElement))
+    {
+        let parent = img.parentElement; //Cache parent
+        img.remove();                   //Remove image
+        if (parent == null) return;     //Stop operation if it was isolated
+
+        img = new Image();          //Create a new image set up style
+        img.style.width = "100%";
+        img.style.height = "auto";
+        parent.appendChild(img);    //Add to parent
+    }
+    img.src = srcUrl;   //Set image source url
+
+    //Image styling after successful load
+    img.onload = ()=>{
+        // console.log(img.naturalWidth, img.naturalHeight , img.src);
+
+        //Center the image of the thumbnail
+        img.style.objectPosition = "center";
+
+        //If either image dimensions is smaller than element's dimension,
+        //pixelate to avoid blurred image
+        if (img.naturalWidth < img.offsetWidth ||
+            img.naturalHeight < img.offsetHeight) {
+            img.style.imageRendering = "pixelated";
+        }
+        else {
+            img.style.imageRendering = "auto";
+        }
+
+        //Use cover if image is too horizontally long
+        if ((img.naturalWidth / img.naturalHeight) < coverFitThreshold) {
+            img.style.objectFit = "contain";
+        }
+        else {
+            img.style.objectFit = "cover";
+        }
+    };
 }
 
-//JSON helper
-function getJSON(url, callback)
+//Set image source, and cache it with trimmed bookmarkUrl
+function setImgSrc(img, srcUrl, bookmarkUrl)
+{
+    setImgSrc_Only(img, srcUrl);
+    thumbDB[bookmarkUrl] = srcUrl;  //Cache for reuse
+    // console.log('cached ',bookmarkUrl,'->',srcUrl)
+}
+
+// --- Utilities / Helpers ---
+
+//Trim away the starting segment, up to the beginning or end(inclusive) of target
+function trimStart(str, target, inclusive = true)
+{
+    if (str == '' || target == '') {
+        console.log('trimStart > ERROR: Required strings "str" or "target" are missing.');
+        return str;
+    }
+    return inclusive
+    ? str.substr(str.indexOf(target) + target.length)
+    : str.substr(str.indexOf(target));
+}
+//Trim away the ending segment, from target onwards
+function trimEnd(str, target = '"', inclusive = true)
+{
+    if (str == '' || target == '') {
+        console.log('trimEnd > ERROR: Required strings "str" or "target" are missing.');
+        return str;
+    }
+    let buffer = inclusive ? 0 : target.length;
+    return str.substr(0, str.indexOf(target) + buffer);
+}
+
+//Request XMLHttpRequest helper
+function getRequest(url, callback)
 {
     var xhr = new XMLHttpRequest();
     xhr.open("GET", url, true);
@@ -40,38 +115,38 @@ function getJSON(url, callback)
     xhr.send(null);
 }
 
-//Image helper
-function testImage(bookmarkUrl, url, found, fallback) {
-    var tester=new Image();
-    tester.onload = ()=>{
+//Tries to load an Image.
+function tryImage(bookmarkUrl, url, found, fallback)
+{
+    var tester = new Image();
+    tester.onload = () => {
         found(bookmarkUrl, tester);
     };
-    tester.onerror=fallback;
+    tester.onerror = fallback;
     tester.src=url;
 }
 
 //DOMPath helper
 //  https://stackoverflow.com/questions/12644147/getting-element-path-for-selector#answer-22072325
-function dompath(element) {
+function dompath(element)
+{
     var path = '',
     i, innerText, tag, selector, classes;
 
-    for (i = 0; element && element.nodeType == 1; element = element.parentNode, i++) {
+    for (i = 0; element && element.nodeType == 1; element = element.parentNode, i++)
+    {
         innerText = element.childNodes.length === 0 ? element.innerHTML : '';
         tag = element.tagName.toLowerCase();
         classes = element.className;
 
         // Skip <html> and <body> tags
-        if (tag === "html" || tag === "body")
+        if (tag === "html" || tag === "body") {
             continue;
+        }
 
         if (element.id !== '') {
             // If element has an ID, use only the ID of the element
             selector = '#' + element.id;
-
-            // To use this with jQuery, return a path once we have an ID
-            // as it's no need to look for more parents afterwards.
-            //return selector + ' ' + path;
         } else if (classes.length > 0) {
             // If element has classes, use the element tag with the class names appended
             selector = tag + '.' + classes.replace(/ /g , ".");
@@ -79,11 +154,25 @@ function dompath(element) {
             // If element has neither, print tag with containing text appended (if any)
             selector = tag + ((innerText.length > 0) ? ":contains('" + innerText + "')" : "");
         }
-
         path = ' ' + selector + path;
     }
     return path;
 }
+
+//Decode escaped characters
+//  https://stackoverflow.com/questions/1912501/unescape-html-entities-in-javascript#answer-31350391
+function decodeEscapedChars(encodedString)
+{
+    let textArea = document.createElement('textarea');
+    textArea.innerHTML = encodedString;
+
+    //Cache for return and remove textArea
+    let ret = textArea.value.replace('\\', '');
+    textArea.remove();
+    return ret;
+}
+
+// --- Url Processing Section ---
 
 //Youtube-Vimeo code logic taken from
 //  https://github.com/deponeWD/video
@@ -95,42 +184,34 @@ function processYoutubeVimeo(img, url)
         let vID = matches[6];
         if (matches[3].indexOf('youtu') > -1)
         {
-            //Check if this is a playlist
-            matches = url.match(/^.*playlist\?list=([A-Za-z0-9._%-]*)(\&\S+)?$/)
-            if (matches) {
-                let playlistID = matches[1];
+            //video
+            if (url.indexOf('/watch?v=') > -1) {
+                setImgSrc(img, 'https://img.youtube.com/vi/' + vID + '/maxresdefault.jpg', url);
+                return true;
+            }
 
-                // https://developers.google.com/youtube/v3/docs/playlists/list
-                getJSON('https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=' + playlistID +'&key=' + youtubeAPIKey,
-                (err, data) => {
-                    let parsedData = JSON.parse(data);
-                    let thumb = parsedData.items[0].snippet.thumbnails.default.url;
-                    setImgSrc(img, thumb, url);
+            //playlist
+            if (url.indexOf('playlist?list=') > -1) {
+                getRequest(url, (err, data) => {
+                    let thumb = trimStart(data, '"thumbnail":{"thumbnails":[{"url":"');
+                    setImgSrc(img, trimEnd(thumb), url);
                 });
                 return true;
             }
 
-            //Check if this is a channel
-            matches = url.match(/^.*channel\/([A-Za-z0-9._%-]*)(\&\S+)?$/)
-            if (matches) {
-                let channelID = matches[1];
-
-                // https://developers.google.com/youtube/v3/docs/channels/list
-                getJSON('https://www.googleapis.com/youtube/v3/channels?part=snippet&id=' + channelID + '&key=' + youtubeAPIKey,
-                (err, data) => {
-                    let parsedData = JSON.parse(data);
-                    let thumb = parsedData.items[0].snippet.thumbnails.default.url;
-                    setImgSrc(img, thumb, url);
+            //channel
+            if (url.indexOf('channel/')) {
+                getRequest(url, (err, data) => {
+                    let thumb = trimStart(data, '"avatar":{"thumbnails":[{"url":"');
+                    setImgSrc(img, trimEnd(thumb), url);
                 });
                 return true;
             }
-
-            //Otherwise, assume that it's a video url
-            let thumb = 'https://img.youtube.com/vi/' + vID + '/maxresdefault.jpg';
-            setImgSrc(img, thumb, url);
+            setImgSrc(img, 'https://s.ytimg.com/yts/img/favicon-vfl8qSV2F.ico', url);
+            return true;
         }
         else if (matches[3].indexOf('vimeo') > -1) {
-            getJSON('https://vimeo.com/api/v2/video/' + vID + '.json',
+            getRequest('https://vimeo.com/api/v2/video/' + vID + '.json',
             (err, data) => {
                 let parsedData = JSON.parse(data);
                 let thumbSRClarge = parsedData[0].thumbnail_large;
@@ -144,50 +225,140 @@ function processYoutubeVimeo(img, url)
         }
         return true;
     }
+
+    //youtube favicon
+    if (url.indexOf('youtube.com') > -1) {
+        setImgSrc(img, 'https://s.ytimg.com/yts/img/favicon-vfl8qSV2F.ico', url);
+        return true;
+    }
     return false;
 }
 
+//  ... .facebook.com ...
+//  www.facebook.com/username
+//  www.facebook.com/photo.php?fbid=...
+function processFacebook(img,url)
+{
+    if (url.indexOf('.facebook\.com') > -1)
+    {
+        //account
+        if (url.match(/^.*\.facebook\.com\/[A-Za-z0-9.-=\_]+$/)) {
+            getRequest(url, (err, data) => {
+                //  ... xxxx&#039;s profile photo, Image may contain: 1 person" src="img-url" ...
+                let thumb = trimStart(data, 'Profile Photo');
+                    thumb = trimStart(thumb, 'src="');
+                    thumb = decodeEscapedChars(trimEnd(thumb));
+                setImgSrc(img, thumb, url);
+            });
+            return true;
+        }
+
+        //todo: post -> photo
+
+        //photo
+        if (url.indexOf('/photo.php?fbid=') > -1) {
+            getRequest(url, (err, data) => {
+                //  ... player_origin=photos" data-ploi="img-src" ...
+                let thumb = trimStart(data, 'player_origin=photos" data-ploi="');
+                    thumb = decodeEscapedChars(trimEnd(thumb));
+                setImgSrc(img, thumb, url);
+            });
+            return true;
+        }
+
+        //favicon
+        setImgSrc(img, 'https://www.facebook.com/images/fb_icon_325x325.png', url);
+        return true;
+    }
+
+    //Other stuffs; site -> php -> image url
+    return false;
+}
+
+//  www.instagram.com
+//  www.instagram.com/direct/...
+//  www.instagram.com/explore
+//  www.instagram.com/username/...
+//  www.instagram.com/p/ABcDE6ghIJK
+//  ... .instagram.com ...
 function processInsta(img, url)
 {
-    matches = url.match(/^(http:|https:|).*\.instagram\.com\/p\/[A-Za-z0-9]+$/);
-    if (matches)
+    if (url.indexOf('instagram.com') > -1)
     {
-        //Is a post
+        //post
         if (url.indexOf('/p/') > -1) {
             // https://developers.facebook.com/docs/instagram/embedding
             let thumb = url + "/media";
             setImgSrc(img, thumb, url);
         }
-        //todo: Else, its a username
+        else {
+            getRequest(url, (err, data) => {
+                //profile pic
+                let thumb = 'profile_pic_url":"';
+                if (data.indexOf(thumb) > -1) {
+                    thumb = trimStart(data, thumb);
+                    thumb = trimEnd(thumb);
+                    thumb = JSON.parse('"' + thumb + '"');
+                }
+                //favicon
+                else {
+                    thumb = trimStart(data, 'rel="shortcut icon" href="');
+                    thumb = trimEnd(thumb);
+                }
+                setImgSrc(img, thumb, url);
+            });
+        }
         return true;
     }
     return false;
 }
 
+//  ... .giphy.com ...
+//  www.giphy.com/username
+//  www.giphy.com/gifs/title-1BcDe6GHIj1LMNOPqR
 function processGiphy(img, url)
 {
-    let matches = url.match(/giphy.com\/([A-Za-z0-9_-]+)$/);
-    if (matches != null)
-    {
-        let user = matches[1];
+    let favicon = 'https://giphy.com/static/img/favicon.png';
 
-        // https://developers.giphy.com/docs/api/endpoint#search
-        getJSON('https://api.giphy.com/v1/gifs/search?q=' + user + '&limit=1&api_key=' + giphyPublicBetaKey,
-        (err, data) => {
-            let parsedData = JSON.parse(data);
-            let thumb = parsedData.data[0].user.avatar_url;
+    if (url.indexOf('giphy.com') > -1)
+    {
+        //  GIFs
+        let matches = url.match(/giphy.com\/gifs\/([A-Za-z0-9\_-]+)$/)
+        if (matches)
+        {
+            let trail = matches[1];
+
+            let id = trail.substr(trail.lastIndexOf('-')+1);
+            let thumb = 'https://media3.giphy.com/media/' + id + '/giphy.gif';
             setImgSrc(img, thumb, url);
-        });
-        return true;
-    }
+            return true;
+        }
 
-    matches = url.match(/giphy.com\/gifs\/([A-Za-z0-9_-]+)$/);
-    if (matches != null)
-    {
-        let trail = matches[1];
-        let id = trail.substr(trail.lastIndexOf('-')+1);
-        let thumb = 'https://media3.giphy.com/media/' + id + '/giphy.gif';
-        setImgSrc(img, thumb, url);
+        //  Profile
+        matches = url.match(/giphy.com\/([A-Za-z0-9_-]+)$/);
+        if (matches)
+        {
+            let user = matches[1];
+
+            //  https://developers.giphy.com/docs/api/endpoint#search
+            getRequest('https://api.giphy.com/v1/gifs/search?q=' + user + '&limit=1&api_key=' + giphyPublicBetaKey,
+            (err, data) => {
+                let parsedData = JSON.parse(data);
+
+                let first = parsedData.data[0];
+                if (first.user && first.user.avatar_url)
+                {
+                    let thumb = first.user.avatar_url;
+                    setImgSrc(img, thumb, url);
+                }
+                else {
+                    setImgSrc(img, favicon, url);
+                }
+            });
+            return true;
+        }
+
+        setImgSrc(img, favicon, url);
         return true;
     }
     return false;
@@ -195,40 +366,12 @@ function processGiphy(img, url)
 
 function processDeviantArt(img, url)
 {
-    let matches = url.match(/^.*deviantart\.com\/([A-Za-z0-9_-]+)$/);
-
-    //Handle deviantArt userpage
-    if (matches)
-    {
-        let user = matches[1];
-
-        //DeviantArt backend API has a /user/whois endpoint, but it requires authorization
-        //So I'm resorting to brute forcing image type
-        var userUrl = 'https://a.deviantart.net/avatars-big/' + user[0] +'/' + user[1] + '/' + user;
-
-        //Success callback
-        let success = (bookmarkUrl, foundImage)=>{
-            let thumb = foundImage.src;
-            setImgSrc(img, thumb, bookmarkUrl);
-        }
-
-        //Note: You can reorder which image-type to grab first
-        testImage(url, userUrl+'.gif', success, ()=> {
-            testImage(url, userUrl+'.png', success, ()=> {
-                testImage(url, userUrl+'.jpg', success, ()=> {
-                    //unhandled case, exhausted all known types
-                });
-            });
-        });
-        return true;
-    }
-
-    //Fallback to oembed method
-    matches = url.match(/^.*(deviantart\.com\/[A-Za-z0-9_-]+\/(art\/[A-Za-z0-9_-]+|.*#\/\d*)|(fav\.me\/[A-Za-z0-9_-]+|sta\.sh\/[A-Za-z0-9_-]+))$/);
+    //  oembed method
+    let matches = url.match(/^.*(deviantart\.com\/[A-Za-z0-9_-]+\/(art\/[A-Za-z0-9_-]+|.*#\/\d*)|(fav\.me\/[A-Za-z0-9_-]+|sta\.sh\/[A-Za-z0-9_-]+))$/);
     if (matches)
     {   
-        // https://www.deviantart.com/developers/oembed#depths
-        getJSON('https://backend.deviantart.com/oembed?url=' + url,
+        //  https://www.deviantart.com/developers/oembed#depths
+        getRequest('https://backend.deviantart.com/oembed?url=' + url,
         (err, data) => {
             let parsedData = JSON.parse(data);
             let thumb = parsedData.thumbnail_url;
@@ -236,79 +379,393 @@ function processDeviantArt(img, url)
         });
         return true;
     }
+
+    //Deviantart domain
+    if (url.match(/^.*deviantart\.com.*$/))
+    {
+        //  Userpage
+        matches = url.match(/^.*deviantart\.com\/([A-Za-z0-9_-]+)$/)
+        if (matches)
+        {
+            getRequest(url, (err, data) => {
+                let thumb = trimStart(data, 'property="og:image" content="');
+                setImgSrc(img, trimEnd(thumb), url);
+            });
+            return true;
+        }
+
+        //  favicon
+        let thumb = 'https://st.deviantart.net/eclipse/icons/da_favicon_v2.ico';
+        setImgSrc(img, thumb);
+        return true;
+    }
+
     return false;
 }
 
 function processNewgrounds(img, url)
 {
-    let matches = url.match(/newgrounds.com\/(portal\/view|audio\/listen)\/(\d+)$/);
-    if (matches)
+    //Assume it's from profile
+    if (url.indexOf('newgrounds.com') > -1)
     {
-        let type = matches[1];
-        let id = matches[2];
-        if (type == 'portal/view') {
-            let culled = parseInt(id);
-            culled = '' + Math.floor(culled / 1000) + '000';
-            let thumb = 'https://picon.ngfiles.com/' + culled + '/flash_' + id + '.png';
-            setImgSrc(img, thumb, url);
+        //Check for Portal / Audio submission
+        let matches = url.match(/\.newgrounds.com\/(portal\/view|audio\/listen)\/(\d+)$/);
+        if (matches) {
+            let type = matches[1];
+            let id = matches[2];
+            if (type == 'portal/view') {
+                let culled = parseInt(id);
+                culled = '' + Math.floor(culled / 1000) + '000';
+                let thumb = 'https://picon.ngfiles.com/' + culled + '/flash_' + id + '.png';
+                setImgSrc(img, thumb, url);
+            }
+            else if (type == 'audio/listen') {
+                let culled = parseInt(id);
+                culled = '' + Math.floor(culled / 1000);
+                let thumb = 'https://aicon.ngfiles.com/' + culled + '/' + id + '.png';
+                setImgSrc(img, thumb, url);
+            }
+            return true;
         }
-        else if (type == 'audio/listen') {
-            let culled = parseInt(id);
-            culled = '' + Math.floor(culled / 1000);
-            let thumb = 'https://aicon.ngfiles.com/' + culled + '/' + id + '.png';
-            setImgSrc(img, thumb, url);
+
+        //Assume user profile page
+        matches = url.match(/^.*[A-Za-z0-9-\_]\.newgrounds\.com.*$/);
+        if (matches &&
+            //Not general newgrounds domain
+            url.indexOf('www.newgrounds.com') == -1) {  
+            //  ... style="background-image: url('img-src')">View Profile</a> ...
+            getRequest(url, (err, data) => {
+                let m = data.match(/url\('(\/\/.*)'\)">View/);
+                if (m) {
+                    let thumb = 'https:' + m[1];
+                    setImgSrc(img, thumb, url);
+                }
+            });
+            return true;
         }
-        //other format WIP
+
+        //Fallback to favicon
+        setImgSrc(img,'https://www.newgrounds.com/img/icons/favicon.png',url)
         return true;
     }
     return false;
 }
 
-//Process url to populate desired thumbnail
-function parseUrl (img, url) {
-    if (url == '')
-        return;
+function processPixiv(img, url)
+{
+    if (url.indexOf('.pixiv.net') > -1) {
+        // ... id="meta-preload-data" ... ,"image":"img-src" ...
+        getRequest(url, (err, data) => {
+            let thumb = trimStart(data, 'id="meta-preload-data"');
+            let target ='';
+            //picture
+            if (thumb.indexOf(target=',"thumb":"') > -1) {
+                thumb = trimStart(thumb, target);
+            }
+            //profile
+            else if (thumb.indexOf(target=',"image":"') > -1) {
+                thumb = trimStart(thumb, target);
+            }
+            //favicon, trailing " to offset trim at end
+            else {
+                thumb = 'https://www.pixiv.net/favicon.ico"';
+            }
+            setImgSrc(img, trimEnd(thumb), url);
+        });
+        return true;
+    }
+    return false;
+}
 
-    //Trim backslash
-    while (url.endsWith('/'))
+function processWiki(img, url)
+{
+    //Gamepedia
+    if (url.indexOf('gamepedia.com/') > -1) {
+        getRequest(url, (err, data) => {
+
+            //favicon
+            let thumb = trimEnd(url, 'gamepedia.com') + '/media/6/64/Favicon.ico';
+
+            //title logo
+            let target = 'meta property="og:image"';
+            if ((data.indexOf(target) > -1)) {
+                thumb = trimStart(data, target);
+                thumb = trimStart(thumb, 'content="');
+                thumb = trimEnd(thumb);
+            }
+            setImgSrc(img,thumb,url);
+        });
+        return true;
+    }
+    //Fandom
+    else if (url.indexOf('fandom.com/') > -1) {
+        if (url.indexOf('/wiki/') > -1) {
+            getRequest(url, (err, data) => {
+
+                //wiki favicon, trailing " for trim at end
+                let target = url.replace(/(http:|https:|)\/\/(www.|m.)?([A-Za-z0-9.\_%-]*)\.fandom.*/, '$3');
+                let thumb = 'https://vignette.wikia.nocookie.net/' + target + '/images/6/64/Favicon.ico"';
+
+                //wiki logo
+                if (data.indexOf(target='accesskey="z"') > -1) {
+                    thumb = trimStart(data, target);
+                    thumb = trimStart(thumb, 'src="');
+                }
+                setImgSrc(img, trimEnd(thumb), url);
+            });
+            return true;
+        }
+        //favicon
+        setImgSrc(img, 'https://static.wikia.nocookie.net/qube-assets/f2/3958/favicons/favicon.ico', url);
+        return true;
+    }
+    return false;
+}
+
+function processSteam(img, url)
+{
+    if (url.indexOf('steamcommunity.com') > -1 ||
+        url.indexOf('steampowered.com') > -1) {
+        getRequest(url, (err, data) => {
+
+            let thumb = '', target = '';
+
+            //Non-src urls
+            if (data.indexOf(target='class="workshop_header"') > -1)
+            {
+                thumb = trimStart(data, target);
+                thumb = trimStart(thumb, "background-image:url('");
+                setImgSrc(img, trimEnd(thumb, "'"), url);
+                return;
+            }
+            //preview image
+            else if (data.indexOf(target='id="previewImageMain"') > -1) {
+                thumb = trimStart(data, target);
+                thumb = trimStart(thumb, 'src="');
+                setImgSrc(img, trimEnd(thumb), url);
+                return;
+            }
+
+            //class keyword
+            let parsedData = data;
+            while (parsedData.indexOf('class="') > -1) {
+                thumb = trimStart(parsedData, 'class="');
+                let matches = thumb.match(/^(game_header_image_full|grouppage_resp_logo|customBrowseLink|workshopItemPreviewImageMain|market_listing_iteminfo|subbox_left|guidePreviewImage|ActualMedia|playerAvatar)"/);
+                if (matches && matches.length > 1) {
+                    thumb = trimStart(thumb, 'src="');
+                    setImgSrc(img, trimEnd(thumb), url);
+                    return;
+                }
+                parsedData = trimStart(thumb, '"');
+            }
+            //sharefiles video & news
+            if (data.indexOf('rel="image_src"') > -1)
+            {
+                let thumb = trimStart(data, 'rel="image_src"');
+                    thumb = trimStart(thumb, 'href="');
+                    thumb = trimEnd(thumb);
+                setImgSrc(img, thumb, url);
+                return;
+            }
+            //favicon
+            setImgSrc(img, 'https://steamcommunity.com/favicon.ico', url);
+        });
+        return true;
+    }
+    return false;
+}
+
+function processOsu(img,url)
+{
+    if (url.indexOf('osu.ppy.sh') > -1)
+    {
+        getRequest(url, (err, data) => {
+            let thumb = '', target = '';
+            //user
+            if ((url.indexOf('/users/') > -1) &&
+                (data.indexOf(target='"user":{"avatar_url":"') > -1)) {
+                thumb = trimStart(data, target);
+                thumb = decodeEscapedChars(trimEnd(thumb));
+            }
+            //beatmapsets
+            else if (url.indexOf(target='/beatmapsets/') >-1) {
+                thumb = trimStart(url,target);
+                thumb = trimEnd(thumb,'#osu');
+                thumb = 'https://assets.ppy.sh/beatmaps/' + thumb + '/covers/cover.jpg';
+            }
+            //artist
+            else if (data.indexOf(target='.artist__portrait {') > -1)
+            {
+                thumb = trimStart(data, target);
+                thumb = trimStart(thumb, "background-image: url('");
+                thumb = trimEnd(thumb, "'");
+            }
+            //favicon
+            else {
+                thumb = 'https://osu.ppy.sh/apple-touch-icon.png';
+            }
+            setImgSrc(img, thumb, url);
+        });
+        return true;
+    }
+    return false;
+}
+
+function processReddit(img,url)
+{
+    if (url.indexOf('reddit.com') > -1)
+    {
+        if (url.endsWith('.com')) {
+            thumb = 'https://www.redditstatic.com/desktop2x/img/favicon/apple-icon-120x120.png';
+            setImgSrc(img,thumb,url);
+            return true;
+        }
+        getRequest(url, (err, data) => {
+            
+            let thumb = '', target = '';
+
+            //community icon
+            if (data.indexOf(target='--newCommunityTheme-banner-iconImage: url("') > -1) {
+                thumb = trimStart(data, target);
+                thumb = trimEnd(thumb);
+            }
+            //account icon
+            else if (data.indexOf(target='"accountIcon":"') > -1) {
+                thumb = trimStart(data, target);
+                thumb = trimEnd(thumb);
+                thumb = JSON.parse('"' + thumb + '"');
+            }
+            //image
+            else if (data.indexOf(target='"thumbnail":{"url":"') > -1) {
+                thumb = trimStart(data, target);
+                thumb = trimEnd(thumb);
+            }
+            //page
+            else if (data.indexOf(target='class="iconImage: url("') > -1) {
+                thumb = trimStart(data, target);
+                thumb = trimEnd(thumb);
+            }
+
+            //favicon, self correction if wrongly received
+            if (thumb == '' || thumb == 'self') {
+                thumb = 'https://www.redditstatic.com/desktop2x/img/favicon/apple-icon-120x120.png';
+            }
+            //Set thumb
+            setImgSrc(img, thumb, url);
+        });
+        return true;
+    }
+    return false;
+}
+
+function processTumblr(img, url)
+{
+    if (url.indexOf('.tumblr.com') > -1)
+    {
+        getRequest(url, (err, data) => {
+            let thumb = '', target = '';
+
+            //post
+            if ((url.indexOf('/post/') > -1) &&
+                (data.indexOf(target='property="og:image:secure_url"') > -1)) {
+                thumb = trimStart(data, target);
+                thumb = trimStart(thumb, 'content="');
+            }
+            //avatar
+            else if (data.indexOf(target='class="avatar-circle"') > -1) {
+                thumb = trimStart(data, target);
+                thumb = trimStart(thumb, 'src="');
+            }
+            //favicon, trailing " to offset trim
+            else {
+                thumb = 'https://assets.tumblr.com/images/favicons/favicon.ico"';
+            }
+
+            setImgSrc(img, trimEnd(thumb), url);
+        });
+        return true;
+    }
+    return false;
+}
+
+function processTwitter(img, url)
+{
+    //https://abs.twimg.com/favicons/twitter.ico
+}
+
+//Process url to populate desired thumbnail
+function parseUrl (img, url)
+{
+    if (url == '')  return;     //Skip processing empty url
+
+    while (url.endsWith('/'))   //Trim backslash
         url = url.slice(0,-1);
 
     //If url was cached, pull a cached image-url
-    if (thumbDB.hasOwnProperty(url)) {
-        img.src = thumbDB[url];
+    if (thumbDB.hasOwnProperty(url))
+    {
+        let srcUrl = thumbDB[url];      //Reuse &
+        setImgSrc_Only(img, srcUrl);    //Recycle
         return;
     }
     // console.log('parseUrl process', url);
 
     //Process unrecognized url
     //  leave if operation is done or delegated
-    if (processYoutubeVimeo(img,url))   return;
-    if (processInsta(img, url))         return;
-    if (processGiphy(img, url))         return;
-    if (processDeviantArt(img, url))    return;
-    if (processNewgrounds(img, url))    return;
+    let i = 0;
+    let callback = null;
+    while(1)
+    {
+        switch(i)
+        {
+            case 0: callback = processYoutubeVimeo; break;
+            case 1: callback = processFacebook;     break;
+            case 2: callback = processInsta;        break;
+            case 3: callback = processGiphy;        break;
+            case 4: callback = processDeviantArt;   break;
+            case 5: callback = processNewgrounds;   break;
+            case 6: callback = processPixiv;        break;
+            case 7: callback = processSteam;        break;
+            case 8: callback = processOsu;          break;
+            case 9: callback = processWiki;         break;
+            case 10:callback = processReddit;       break;
+            case 11:callback = processTumblr;       break;
+            default:    return;
+        }
+        if (callback(img,url))  return;
+        ++i;
+    }
 }
 
 //Main update loop
 function adaptBookmarkThumbnails()
 {
-    //Get list of bookmark cardviews
+    //Fetch a list of bookmark cardviews
     let view = document.querySelectorAll('.addbookmark-cardwrapper .upper-half');
 
     //For each of those elements
     view.forEach(el => {
-        //Fetch a list of its UrlInputFields & PreviewImages
+        //Get its UrlInputFields
         let urlField = el.querySelector('.title-and-address .fieldset .UrlField input[placeholder="Address"]');
+
+        //Bookmark address field is mandatory
+        if (urlField == null)   return;
+
+        //Get its PreviewImage
         var img = el.querySelector('.preview .thumbnail-image img');
 
-        //If both address and preview image elements are present
-        if (urlField != null && img != null)
+        //Image doesn't exist? Let's assume that it's a default SVG element then
+        if (img == null)
+            img = el.querySelector('.preview .thumbnail-image svg');
+
+        //If both address and "img" is present, let's begin
+        if (img != null)
         {
-            var url = urlField.value;
-            while (url.endsWith('/'))   //trim backslash
+            var url = urlField.value;   //Url from Boomark address field
+            while (url.endsWith('/'))   //trim backslash for standardization
                 url = url.slice(0, -1);
 
-            let fieldPath = dompath(urlField);
+            let fieldPath = dompath(urlField);  //Get DOM path
 
             //Is this field being tracked?
             if (addrFields.hasOwnProperty(fieldPath))
@@ -360,4 +817,4 @@ function adaptBookmarkThumbnails()
 }
 
 //Run update loop
-var bookmarkThumbnailAdapter = setInterval(adaptBookmarkThumbnails, 1000);
+var bookmarkThumbnailAdapter = setInterval(adaptBookmarkThumbnails, tickRate);
